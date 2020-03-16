@@ -236,3 +236,16 @@ helps['extension generate-docs'] = """
     long-summary: >
         This command installs the extensions in a temporary directory and sets it as the extensions dir when generating reference docs.
 """
+
+helps['extension migrate'] = """
+    short-summary: Migrate extensions from source index to target storage account.
+    long-summary: >
+        This command migrates specified extensions from source index file to the target storage account and update the target index.
+    examples:
+        - name: Migrate the contoso extension to a target storage account.
+          text: >
+            azdev extension migrate contoso --storage-account mystorage --storage-account-key 0000-0000 --storage-container extensions
+        - name: Migrate all extensions from source to target.
+          text: >
+            azdev extension migrate contoso --storage-account mystorage --storage-account-key 0000-0000 --storage-container extensions --source-index https://customized/source/index.json --target-index https://customized/target/index.json --all
+"""

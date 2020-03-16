@@ -51,6 +51,7 @@ def load_command_table(self, _):
         g.command('build', 'build_extensions')
         g.command('publish', 'publish_extensions')
         g.command('update-index', 'update_extension_index')
+        g.command('migrate', 'migrate_extensions')
 
     with CommandGroup(self, 'extension repo', operation_group('extensions')) as g:
         g.command('add', 'add_extension_repo')

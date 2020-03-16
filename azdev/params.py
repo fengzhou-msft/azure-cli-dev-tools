@@ -94,7 +94,7 @@ def load_arguments(self, _):
         c.argument('storage_account_key', help='Key of the storage account to publish to. ', arg_group='Storage',
                    configured_default='storage_account')
 
-    for scope in ['extension add', 'extension remove', 'extension build', 'extension publish']:
+    for scope in ['extension add', 'extension remove', 'extension build', 'extension publish', 'extension migrate']:
         with ArgumentsContext(self, scope) as c:
             c.positional('extensions', metavar='NAME', nargs='+', help='Space-separated list of extension names.')
 
@@ -139,3 +139,12 @@ def load_arguments(self, _):
                                           'If the base directory does not exist, it will be created')
             c.argument('output_type', choices=['xml', 'html', 'text', 'man', 'latex'], default="xml",
                        help='Output type of the generated docs.')
+
+    with ArgumentsContext(self, 'extension migrate') as c:
+        c.argument('storage_account', help='Name of the storage account to publish to. Environment variable: AZDEV_DEFAULTS_STORAGE_ACCOUNT.', arg_group='Storage', configured_default='storage_account')
+        c.argument('storage_container', help='Name of the storage container to publish to. Environment variable: AZDEV_DEFAULTS_STORAGE_CONTAINER.', arg_group='Storage', configured_default='storage_container')
+        c.argument('storage_account_key', help='Key of the storage account to publish to. ', arg_group='Storage',
+                   configured_default='storage_account')
+        c.argument('all_', options_list=['--all'], help='Migrate all extensions from source index.')
+        c.argument('source_index', help='Source index file path or url')
+        c.argument('target_index', help='Target index file path or url')
