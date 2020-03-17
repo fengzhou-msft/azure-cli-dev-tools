@@ -21,7 +21,7 @@ from azdev.utilities import (
 logger = get_logger(__name__)
 
 DEFAULT_SOURCE_INDEX_URL = "https://aka.ms/azure-cli-extension-index-v1"
-DEFAULT_TARGET_INDEX_URL = ""
+DEFAULT_TARGET_INDEX_URL = "https://extmigrate.blob.core.windows.net/extensions/index.json"
 
 def add_extension(extensions):
 
@@ -327,70 +327,87 @@ def publish_extensions(extensions, storage_account, storage_account_key, storage
 
 
 def migrate_extensions(extensions, storage_account, storage_account_key, storage_container,
-                       source_index=None, target_index=None, yes=False, all_=False):
+                       source_index=None,
+                    #    target_index=None,
+                       yes=False,
+                    #    all_=False
+                       ):
     import requests
     import tempfile
     import os
     import re
     import json
-    print('in migrate')
-    if yes:
-        return
     heading('Migrate Extensions')
     require_azure_cli()
     source_index = source_index or DEFAULT_SOURCE_INDEX_URL
-    subheading('Downloading WHLs')
+    subheading('Migrating WHLs')
 
     temp_dir = tempfile.mkdtemp()
-    index_file = requests.get(source_index, allow_redirects=True)
+    index_file = _download_file(source_index)
 
-    # open(os.path.join(temp_dir, 'index.json'), 'wb').write(index_file.content)
-    exts = json.loads(index_file)['extensions']
-    # exts = exts if all else [ext in exts if ext]
-    if all_:
+    exts = json.loads(index_file.content)['extensions']
+    if len(extensions) == 1 and extensions[0].lower() == 'all':
         extensions = exts.keys()
     uploaded_urls = []
     for extension_name in extensions:
         if extension_name not in exts.keys():
-            logger.warning("Extension '%s' not found in source index.", extension_name)
-        else:
-            download_url = exts[extension_name][-1]['downloadUrl']
-            response = requests.get(download_url, allow_redirects=True)
-            d = response.headers['content-disposition']
-            whl_file = re.findall("filename=(.+)", d)[0]
-            whl_path = os.path(temp_dir, whl_file)
-            open(whl_path, 'wb').write(response.content)
-            if not yes:
-                from azure.storage.blob import BlockBlobService
-                client = BlockBlobService(account_name=storage_account, account_key=storage_account_key)
-                exists = client.exists(container_name=storage_container, blob_name=whl_file)
+            raise CLIError("Extension '{}' not found in source index.".format(extension_name))
+        display(extension_name)
+        download_url = exts[extension_name][-1]['downloadUrl']
+        response = _download_file(download_url)
+        whl_file = download_url.split('/')[-1]
+        whl_path = os.path.join(temp_dir, whl_file)
+        open(whl_path, 'wb').write(response.content)
+        from azure.storage.blob import BlockBlobService
+        client = BlockBlobService(account_name=storage_account, account_key=storage_account_key)
+        if not yes:
+            exists = client.exists(container_name=storage_container, blob_name=whl_file)
 
-                if exists:
-                    if not prompt_y_n(
-                            "{} already exists. You may need to bump the extension version. Replace?".format(whl_file),
-                            default='n'):
-                        logger.warning("Skipping '%s'...", whl_file)
-                        continue
-            # upload the WHL file
-            client.create_blob_from_path(container_name=storage_container, blob_name=whl_file,
-                                         file_path=os.path.abspath(whl_path))
-            url = client.make_blob_url(container_name=storage_container, blob_name=whl_file)
+            if exists:
+                if not prompt_y_n(
+                        "{} already exists. You may need to bump the extension version. Replace?".format(whl_file),
+                        default='n'):
+                    logger.warning("Skipping '%s'...", whl_file)
+                    continue
+        # upload the WHL file
+        client.create_blob_from_path(container_name=storage_container, blob_name=whl_file,
+                                        file_path=os.path.abspath(whl_path))
+        url = client.make_blob_url(container_name=storage_container, blob_name=whl_file)
 
-            logger.info(url)
-            uploaded_urls.append(url)
+        logger.info(url)
+        uploaded_urls.append(url)
 
-    target_index = target_index or DEFAULT_TARGET_INDEX_URL
-    target_index_file = requests.get(target_index, allow_redirects=True)
+    target_index = DEFAULT_TARGET_INDEX_URL
+    target_index_file = _download_file(target_index)
+    os.mkdir(os.path.join(temp_dir, 'target'))
     target_index_path = os.path.join(temp_dir, 'target', 'index.json')
 
     open(target_index_path, 'wb').write(target_index_file.content)
     update_target_extension_index(uploaded_urls, target_index_path)
+    client.create_blob_from_path(container_name=storage_container, blob_name='index.json',
+                                 file_path=os.path.abspath(target_index_path))
 
     subheading('Migrated WHLs')
     for url in uploaded_urls:
         display(url)
 
     shutil.rmtree(temp_dir)
+
+
+def _download_file(url):
+    import requests
+    count = 3
+    the_ex = None
+    while count > 0:
+        try:
+            response = requests.get(url, allow_redirects=True)
+            break
+        except Exception as ex:  # pylint: disable=broad-except
+            the_ex = ex
+            count -= 1
+    if count == 0:
+        raise CLIError("Request for {} failed: {}".format(url, str(the_ex)))
+    return response
 
 
 def update_target_extension_index(extensions, target_index_path):
@@ -442,4 +459,3 @@ def update_target_extension_index(extensions, target_index_path):
         # update index and write back to file
         with open(os.path.join(target_index_path), 'w') as outfile:
             outfile.write(json.dumps(curr_index, indent=4, sort_keys=True))
-        # todo upload index file
