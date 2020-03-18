@@ -122,6 +122,16 @@ def run_tests(tests, xml_path=None, discover=False, in_series=False,
 
     sys.exit(0 if not exit_code else 1)
 
+resource_key_dict = {'ResourceGroup':'rg',
+                     'StorageAccount':'sa',
+                     'KeyVault':'kv',
+                     'RoleBasedServicePrincipal':'sp',
+                     'ManagedApplication':'app'}
+
+import string
+def _random_str(size=6, chars=string.ascii_lowercase + string.digits):
+    return ''.join(random.choice(chars) for _ in range(size))
+
 
 def _generate_test_commands(file):
     cmd = ""
@@ -130,7 +140,19 @@ def _generate_test_commands(file):
     kw_dict = {}
     for line in open(file):
         line = line.strip()
-        if line.startswith('#') or line.startswith('@'):
+        if line.startswith('#'):
+            continue
+        if line.startswith('@'):
+            m = re.search(r'^@(.*)Preparer.*$', line)
+            if m is not None:
+                resource = m.group(1)
+                key = resource_key_dict[resource]
+                if key is not None:
+                    m = re.search(r"name_prefix='(.*)'", line)
+                    if m is not None:
+                        kw_dict[key] = m.group(1)
+                    else:
+                        kw_dict[key] = '{}{}'.format(key, _random_str())
             continue
         if line.startswith('def'):
             cmd = _process_cmd(cmd, kw_dict)
