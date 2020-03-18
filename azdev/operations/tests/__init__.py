@@ -30,7 +30,8 @@ logger = get_logger(__name__)
 # pylint: disable=too-many-statements
 def run_tests(tests, xml_path=None, discover=False, in_series=False,
               run_live=False, profile=None, last_failed=False, pytest_args=None,
-              git_source=None, git_target=None, git_repo=None, gen_test_commands=None):
+              git_source=None, git_target=None, git_repo=None, script_only=None,
+              script_style=None):
 
     require_virtual_env()
 
@@ -99,14 +100,14 @@ def run_tests(tests, xml_path=None, discover=False, in_series=False,
     if not test_paths:
         raise CLIError('No tests selected to run.')
 
-    if gen_test_commands:
+    if script_only:
         for test_path in test_paths:
             if test_path.endswith('latest'):
                 files = [file for file in os.listdir(test_path) if file.startswith('test') and file.endswith('py')]
                 for file in files:
                     heading('{}'.format(file))
                     file = os.path.join(test_path, file)
-                    _generate_test_commands(file)
+                    _generate_test_commands(file, script_style)
         return
 
     runner = get_test_runner(parallel=not in_series, log_path=xml_path, last_failed=last_failed)
@@ -133,7 +134,7 @@ def _random_str(size=6, chars=string.ascii_lowercase + string.digits):
     return ''.join(random.choice(chars) for _ in range(size))
 
 
-def _generate_test_commands(file):
+def _generate_test_commands(file, script_style):
     cmd = ""
     in_cmd = False
     process_kw = False
@@ -143,6 +144,7 @@ def _generate_test_commands(file):
         if line.startswith('#'):
             continue
         if line.startswith('@'):
+            # extra parameter value from resource preparer decorator
             m = re.search(r'^@(.*)Preparer.*$', line)
             if m is not None:
                 resource = m.group(1)
@@ -176,7 +178,11 @@ def _generate_test_commands(file):
         if in_cmd:
             words = line.split("'")
             if len(words) > 1:
-                cmd += line.split("'")[1]
+                if script_style == 'multiline':
+                    cmd = cmd + '\\\n' if cmd else cmd
+                    cmd += line.split("'")[1]
+                else:
+                    cmd += line.split("'")[1]
     cmd = _process_cmd(cmd, kw_dict)
 
 

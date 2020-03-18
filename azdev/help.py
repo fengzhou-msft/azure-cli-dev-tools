@@ -124,6 +124,9 @@ helps['test'] = """
 
         - name: Run tests for only those modules which have changed based on a git diff.
           text: azdev test --repo azure-cli --tgt upstream/master --src upstream/dev
+
+        - name: Only generate tests script in multiline style with parameter values filled.
+          text: azdev test {mod} --script-only --script-style multiline
 """
 
 

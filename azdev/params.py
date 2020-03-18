@@ -50,7 +50,8 @@ def load_arguments(self, _):
         c.argument('profile', options_list='--profile', help='Run automation against a specific profile. If omit, the tests will run against current profile.')
         c.argument('pytest_args', nargs=argparse.REMAINDER, options_list=['--pytest-args', '-a'], help='Denotes the remaining args will be passed to pytest.')
         c.argument('last_failed', options_list='--lf', action='store_true', help='Re-run the last tests that failed.')
-        c.argument('gen_test_commands', action='store_true', help='Generate test commands with filled values.')
+        c.argument('script_only', action='store_true', help='Only generate test commands script with filled values. No tests run.')
+        c.argument('script_style', choices=['oneline', 'multiline'], default='oneline', help='The style of generated test commands.')
 
     with ArgumentsContext(self, 'coverage') as c:
         c.argument('prefix', type=str, help='Filter analysis by command prefix.')
