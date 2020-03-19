@@ -357,6 +357,13 @@ def migrate_extensions(extensions, storage_account, storage_account_key, storage
         # backup the old index.json
         client.create_blob_from_path(container_name=storage_container, blob_name='index.json.sav',
                                      file_path=os.path.abspath(target_index_path))
+        inital_index = \
+"""{
+    "extensions": {
+    },
+    "formatVersion": "1"
+}"""
+        open(target_index_path, 'w').write(inital_index)
 
     updated_indexes = []
     for extension_name in extensions:
@@ -429,7 +436,7 @@ def update_target_extension_index(updated_indexes, target_index_path):
 
     for entry in updated_indexes:
         # Get the URL
-        url = entry['donwloadUrl']
+        url = entry['downloadUrl']
         # Extract the extension name
         try:
             extension_name = re.findall(NAME_REGEX, url)[0]
@@ -442,7 +449,10 @@ def update_target_extension_index(updated_indexes, target_index_path):
             curr_index['extensions'][extension_name] = [entry]
         else:
             logger.info("Updating '%s' in index...", extension_name)
-            curr_index['extensions'][extension_name].append(entry)
+            if curr_index['extensions'][extension_name][-1]['filename'] == entry['filename']: # in case of overwrite
+                curr_index['extensions'][extension_name][-1] = entry
+            else:
+                curr_index['extensions'][extension_name].append(entry)
 
     # update index and write back to file
     with open(os.path.join(target_index_path), 'w') as outfile:
