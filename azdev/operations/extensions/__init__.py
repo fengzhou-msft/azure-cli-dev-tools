@@ -328,15 +328,13 @@ def publish_extensions(extensions, storage_account, storage_account_key, storage
 
 def migrate_extensions(extensions, storage_account, storage_account_key, storage_container,
                        source_index=None,
-                    #    target_index=None,
-                       yes=False,
-                    #    all_=False
-                       ):
+                       overwrite=False):
     import requests
     import tempfile
     import os
     import re
     import json
+    from azure.storage.blob import BlockBlobService
     heading('Migrate Extensions')
     require_azure_cli()
     source_index = source_index or DEFAULT_SOURCE_INDEX_URL
@@ -344,54 +342,66 @@ def migrate_extensions(extensions, storage_account, storage_account_key, storage
 
     temp_dir = tempfile.mkdtemp()
     index_file = _download_file(source_index)
-
     exts = json.loads(index_file.content)['extensions']
-    if len(extensions) == 1 and extensions[0].lower() == 'all':
-        extensions = exts.keys()
-    uploaded_urls = []
-    for extension_name in extensions:
-        if extension_name not in exts.keys():
-            raise CLIError("Extension '{}' not found in source index.".format(extension_name))
-        display(extension_name)
-        download_url = exts[extension_name][-1]['downloadUrl']
-        response = _download_file(download_url)
-        whl_file = download_url.split('/')[-1]
-        whl_path = os.path.join(temp_dir, whl_file)
-        open(whl_path, 'wb').write(response.content)
-        from azure.storage.blob import BlockBlobService
-        client = BlockBlobService(account_name=storage_account, account_key=storage_account_key)
-        if not yes:
-            exists = client.exists(container_name=storage_container, blob_name=whl_file)
-
-            if exists:
-                if not prompt_y_n(
-                        "{} already exists. You may need to bump the extension version. Replace?".format(whl_file),
-                        default='n'):
-                    logger.warning("Skipping '%s'...", whl_file)
-                    continue
-        # upload the WHL file
-        client.create_blob_from_path(container_name=storage_container, blob_name=whl_file,
-                                        file_path=os.path.abspath(whl_path))
-        url = client.make_blob_url(container_name=storage_container, blob_name=whl_file)
-
-        logger.info(url)
-        uploaded_urls.append(url)
 
     target_index = DEFAULT_TARGET_INDEX_URL
     target_index_file = _download_file(target_index)
     os.mkdir(os.path.join(temp_dir, 'target'))
     target_index_path = os.path.join(temp_dir, 'target', 'index.json')
-
     open(target_index_path, 'wb').write(target_index_file.content)
-    update_target_extension_index(uploaded_urls, target_index_path)
+
+    client = BlockBlobService(account_name=storage_account, account_key=storage_account_key)
+    migrate_all = (len(extensions) == 1 and extensions[0].lower() == 'all')
+    if migrate_all:
+        extensions = exts.keys()
+        # backup the old index.json
+        client.create_blob_from_path(container_name=storage_container, blob_name='index.json.sav',
+                                     file_path=os.path.abspath(target_index_path))
+
+    updated_indexes = []
+    for extension_name in extensions:
+        if extension_name not in exts.keys():
+            raise CLIError("Extension '{}' not found in source index.".format(extension_name))
+        display(extension_name)
+        if migrate_all:
+            for ext in exts[extension_name]:
+                _migrate_wheel(ext, updated_indexes, client, overwrite, storage_container, temp_dir)
+        else:
+            ext = exts[extension_name][-1]
+            _migrate_wheel(ext, updated_indexes, client, overwrite, storage_container, temp_dir)
+
+    update_target_extension_index(updated_indexes, target_index_path)
     client.create_blob_from_path(container_name=storage_container, blob_name='index.json',
                                  file_path=os.path.abspath(target_index_path))
 
     subheading('Migrated WHLs')
-    for url in uploaded_urls:
-        display(url)
+    for updated_index in updated_indexes:
+        display(updated_index['downloadUrl'])
 
     shutil.rmtree(temp_dir)
+
+
+def _migrate_wheel(ext, updated_indexes, client, overwrite, storage_container, temp_dir):
+    download_url = ext['downloadUrl']
+    response = _download_file(download_url)
+    whl_file = download_url.split('/')[-1]
+    whl_path = os.path.join(temp_dir, whl_file)
+    open(whl_path, 'wb').write(response.content)
+
+    if not overwrite:
+        exists = client.exists(container_name=storage_container, blob_name=whl_file)
+        if exists:
+            logger.warning("Skipping '%s' as it already exists...", whl_file)
+            return
+    # upload the WHL file
+    client.create_blob_from_path(container_name=storage_container, blob_name=whl_file,
+                                 file_path=os.path.abspath(whl_path))
+    url = client.make_blob_url(container_name=storage_container, blob_name=whl_file)
+
+    updated_index = ext
+    updated_index['downloadUrl'] = url
+    updated_indexes.append(updated_index)
+    logger.info(url)
 
 
 def _download_file(url):
@@ -410,52 +420,30 @@ def _download_file(url):
     return response
 
 
-def update_target_extension_index(extensions, target_index_path):
+def update_target_extension_index(updated_indexes, target_index_path):
     import re
-    import tempfile
-
-    from .util import get_ext_metadata, get_whl_from_url
-
 
     NAME_REGEX = r'.*/([^/]*)-\d+.\d+.\d+'
+    with open(target_index_path, 'r') as infile:
+        curr_index = json.loads(infile.read())
 
-    for extension in extensions:
+    for entry in updated_indexes:
         # Get the URL
-        extension = extension[extension.index('https'):]
-        # Get extension WHL from URL
-        if not extension.endswith('.whl') or not extension.startswith('https:'):
-            raise CLIError('usage error: only URL to a WHL file currently supported.')
-
-        # TODO: extend to consider other options
-        ext_path = extension
-
+        url = entry['donwloadUrl']
         # Extract the extension name
         try:
-            extension_name = re.findall(NAME_REGEX, ext_path)[0]
+            extension_name = re.findall(NAME_REGEX, url)[0]
             extension_name = extension_name.replace('_', '-')
         except IndexError:
             raise CLIError('unable to parse extension name')
 
-        # TODO: Update this!
-        extensions_dir = tempfile.mkdtemp()
-        ext_dir = tempfile.mkdtemp(dir=extensions_dir)
-        whl_cache_dir = tempfile.mkdtemp()
-        whl_cache = {}
-        ext_file = get_whl_from_url(ext_path, extension_name, whl_cache_dir, whl_cache)
+        if extension_name not in curr_index['extensions'].keys():
+            logger.info("Adding '%s' to index...", extension_name)
+            curr_index['extensions'][extension_name] = [entry]
+        else:
+            logger.info("Updating '%s' in index...", extension_name)
+            curr_index['extensions'][extension_name].append(entry)
 
-        with open(target_index_path, 'r') as infile:
-            curr_index = json.loads(infile.read())
-
-        entry = {
-            'downloadUrl': ext_path,
-            'sha256Digest': _get_sha256sum(ext_file),
-            'filename': ext_path.split('/')[-1],
-            'metadata': get_ext_metadata(ext_dir, ext_file, extension_name)
-        }
-        # Only keep the latest updated version
-        logger.info("Adding '%s' to index...", extension_name)
-        curr_index['extensions'][extension_name] = [entry]
-
-        # update index and write back to file
-        with open(os.path.join(target_index_path), 'w') as outfile:
-            outfile.write(json.dumps(curr_index, indent=4, sort_keys=True))
+    # update index and write back to file
+    with open(os.path.join(target_index_path), 'w') as outfile:
+        outfile.write(json.dumps(curr_index, indent=4, sort_keys=True))
