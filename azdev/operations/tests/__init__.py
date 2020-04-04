@@ -150,7 +150,7 @@ def _generate_test_commands(file, script_style):
                 resource = m.group(1)
                 key = resource_key_dict[resource]
                 if key is not None:
-                    m = re.search(r"name_prefix='(.*)'", line)
+                    m = re.search(r"name_prefix='(.+?)'", line)
                     if m is not None:
                         kw_dict[key] = m.group(1)
                     else:
@@ -162,7 +162,7 @@ def _generate_test_commands(file, script_style):
             subheading(line.split('(')[0].replace('def ', ''))
         elif line.startswith('self.kwargs.update'):
             process_kw = True
-        elif line.startswith("self.cmd"):
+        elif "self.cmd" in line:
             cmd = _process_cmd(cmd, kw_dict)
             in_cmd = True
             process_kw = False
@@ -170,9 +170,13 @@ def _generate_test_commands(file, script_style):
             in_cmd = False
         elif process_kw:
             kv = line.split(":")
-            if len(kv) == 2:
+            if len(kv) >= 2:
                 key = kv[0].strip().replace("'", "")
-                value = kv[1].strip().replace("'", "").replace(",", "")
+                m = re.search(r"prefix='(.+?)'", kv[1].strip())
+                if m is not None:
+                    value = m.group(1)
+                else:
+                    value = kv[1].strip().replace("'", "").replace(",", "")
                 kw_dict[key] = value
 
         if in_cmd:
